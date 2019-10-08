@@ -76,9 +76,6 @@ Invoke-WebRequest -Uri $FSLogixURI -OutFile "$Localpath$FSInstaller"
 ##############################
 #    Prep for WVD Install    #
 ##############################
-Invoke-Expression `
-    -Command "cmdkey /add:msdean.file.core.windows.net /user:Azure\msdean /pass:M4DObmCRXxnn1Jm/ipwkJ4qhgJt7xoFH9cI7HGxKSp1u4+h8HnAAdTUvLXnKzjED5tcLDDTlHlzuGK+nAeesaQ==" `
-    -ErrorAction SilentlyContinue
 Expand-Archive `
     -LiteralPath "C:\temp\wvd\$FSInstaller" `
     -DestinationPath "$Localpath\FSLogix" `
@@ -310,5 +307,4 @@ Pop-Location
 #    END    #
 #############
 Restart-Computer -Force
-
 
