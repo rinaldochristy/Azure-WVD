@@ -1,4 +1,4 @@
-﻿<#Author       : Dean Cefola
+<#Author       : Dean Cefola
 # Creation Date: 09-15-2019
 # Usage        : Windows Virtual Desktop Scripted Install
 
@@ -14,8 +14,10 @@
 # 09/17/2019                     3.1        Add code to disable IESEC for admins
 # 09/20/2019                     3.2        Add code to discover OS (Server / Client)
 # 09/20/2019                     4.0        Add code for servers to add RDS Host role
-# 10/01/2019                     4.1        Add Windows 7 Support
-# 10/07/2019                     4.2        Add all FSLogix Reg entries for easier management
+# 10/01/2019                     4.2        Add all FSLogix Profile Container Reg entries for easier management
+# 10/07/2019                     4.3        Add FSLogix Office Container Reg entries for easier management
+# 10/16/2019                     5.0        Add Windows 7 Support
+# 03/30/2020                     5.1        Add Sepago WVD Monitoring Agent
 #
 #*********************************************************************************
 #
@@ -29,39 +31,49 @@ Param (
     [Parameter(Mandatory=$true)]
         [string]$ProfilePath,
     [Parameter(Mandatory=$true)]
-        [string]$RegistrationToken
+        [string]$RegistrationToken,
+    [Parameter(Mandatory=$true)]
+        [string]$LogAnalyticsWorkspaceID,
+    [Parameter(Mandatory=$true)]
+        [string]$LogAnalyticsPrimaryKey
 )
 
 
 ######################
 #    WVD Variables   #
 ######################
+$Localpath               = "c:\temp\wvd\"
 $WVDBootURI              = 'https://query.prod.cms.rt.microsoft.com/cms/api/am/binary/RWrxrH'
 $WVDAgentURI             = 'https://query.prod.cms.rt.microsoft.com/cms/api/am/binary/RWrmXv'
 $FSLogixURI              = 'https://go.microsoft.com/fwlink/?linkid=2084562'
-$Win7x86_UpdateURI       = 'https://download.microsoft.com/download/1/E/2/1E2A08C9-B87B-4808-94A6-30BC9D65775E/Windows6.1-KB2592687-x86.msu'
-$Win7x86_WMI5URI         = 'https://download.microsoft.com/download/6/F/5/6F5FF66C-6775-42B0-86C4-47D41F2DA187/Win7-KB3191566-x86.zip'
-$Win7x64_UpdateURI       = 'https://download.microsoft.com/download/A/F/5/AF5C565C-9771-4BFB-973B-4094C1F58646/Windows6.1-KB2592687-x64.msu'
-$Win7x64_WMI5URI         = 'https://download.microsoft.com/download/6/F/5/6F5FF66C-6775-42B0-86C4-47D41F2DA187/Win7AndW2K8R2-KB3191566-x64.zip'
-$Localpath               = "c:\temp\wvd\"
 $FSInstaller             = 'FSLogixAppsSetup.zip'
 $WVDAgentInstaller       = 'WVD-Agent.msi'
 $WVDBootInstaller        = 'WVD-Bootloader.msi'
-$Win7x86_UpdateInstaller = 'Win7-KB2592687-x86.msu'
-$Win7x86_WMI5Installer   = 'Win7-KB3191566-WMI5-x86.zip'
+$Win7x64_UpdateURI       = 'https://download.microsoft.com/download/A/F/5/AF5C565C-9771-4BFB-973B-4094C1F58646/Windows6.1-KB2592687-x64.msu'                                        
+$Win7x64_WMI5URI         = 'https://download.microsoft.com/download/6/F/5/6F5FF66C-6775-42B0-86C4-47D41F2DA187/Win7AndW2K8R2-KB3191566-x64.zip'
 $Win7x64_UpdateInstaller = 'Win7-KB2592687-x64.msu'
 $Win7x64_WMI5Installer   = 'Win7-KB3191566-WMI5-x64.zip'
+$Win7x64_WVDAgentURI     = 'https://query.prod.cms.rt.microsoft.com/cms/api/am/binary/RE3JZCm'
+$Win7x64_WVDBootMgrURI   = 'https://query.prod.cms.rt.microsoft.com/cms/api/am/binary/RE3K2e3'
+$SepagoAgentURI          = 'http://loganalytics.sepago.com/downloads/ITPC-LogAnalyticsAgent.zip'
+$SepagoAgentInstaller    = 'ITPC-LogAnalyticsAgent.zip'
 
 
 ####################################
 #    Test/Create Temp Directory    #
 ####################################
 if((Test-Path $Localpath) -eq $false) {
-    write "creating temp directory"
+    Write-Host `
+        -ForegroundColor Cyan `
+        -BackgroundColor Black `
+        "creating temp directory"
     New-Item -Path $Localpath -ItemType Directory
 }
 else {
-    write "temp directory already exists"
+    Write-Host `
+        -ForegroundColor Yellow `
+        -BackgroundColor Black `
+        "temp directory already exists"
 }
 
 
@@ -71,24 +83,67 @@ else {
 Invoke-WebRequest -Uri $WVDBootURI -OutFile "$Localpath$WVDBootInstaller"
 Invoke-WebRequest -Uri $WVDAgentURI -OutFile "$Localpath$WVDAgentInstaller"
 Invoke-WebRequest -Uri $FSLogixURI -OutFile "$Localpath$FSInstaller"
+Invoke-WebRequest -Uri $SepagoAgentURI -OutFile "$Localpath$SepagoAgentInstaller"
 
 
 ##############################
 #    Prep for WVD Install    #
 ##############################
 Expand-Archive `
-    -LiteralPath "C:\temp\wvd\$FSInstaller" `
+    -LiteralPath "$Localpath$FSInstaller" `
     -DestinationPath "$Localpath\FSLogix" `
     -Force `
     -Verbose
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-cd $Localpath 
+Expand-Archive `
+    -LiteralPath "$Localpath$SepagoAgentInstaller" `
+    -DestinationPath "$Localpath\Sepago" `
+    -Force `
+    -Verbose
+cd "$Localpath\Sepago\Azure Monitor for WVD" 
+
+
+#############################
+#    Sepago Config Setup    #
+#############################
+$sts = $Sepago_deploy_status.ExitCode
+Write-Output "Installing Sepago Agent on VM Complete. Exit code=$sts`n"
+Wait-Event -Timeout 5
+Write-Output "Installation of Sepago Agent on VM Complete.`n"
+
+
+$configFiles = Get-ChildItem . *.config -rec
+foreach ($file in $configFiles) {
+    (Get-Content $file.PSPath) |
+    Foreach-Object { $_ -replace "!!! WORKSPACE ID from Advanced Settings !!!", $LogAnalyticsWorkspaceID } |
+        Set-Content $file.PSPath    
+}
+$configFiles = Get-ChildItem . *.config -rec
+foreach ($file in $configFiles) {
+    (Get-Content $file.PSPath) |
+    Foreach-Object { $_ -replace "!!! PRIMARY or SECONDARY KEY from Advanced Settings !!!", $LogAnalyticsPrimaryKey } |
+        Set-Content $file.PSPath
+}
+$Sepago_deploy_status = Start-Process -FilePath 
+.\ITPC-LogAnalyticsAgent.exe -install
+
+
+
+
+
+
+
+
+
+
+
 
 
 ##############################
 #    OS Specific Settings    #
 ##############################
-$OS = (Get-CimInstance win32_operatingsystem).Name
+cd $Localpath
+$OS = (Get-WmiObject win32_operatingsystem).name
 If(($OS) -match 'server') {
     write-host -ForegroundColor Cyan -BackgroundColor Black "Windows Server OS Detected"
     If(((Get-WindowsFeature -Name RDS-RD-Server).installstate) -eq 'Installed') {
@@ -107,7 +162,7 @@ If(($OS) -match 'server') {
     $SubKey = $BaseKey.OpenSubkey($AdminsKey,$true)
     $SubKey.SetValue("IsInstalled",0,[Microsoft.Win32.RegistryValueKind]::DWORD)
     $SubKey = $BaseKey.OpenSubKey($UsersKey,$true)
-    $SubKey.SetValue("IsInstalled",0,[Microsoft.Win32.RegistryValueKind]::DWORD)
+    $SubKey.SetValue("IsInstalled",0,[Microsoft.Win32.RegistryValueKind]::DWORD)    
 }
 Else {
     write-host -ForegroundColor Cyan -BackgroundColor Black "Windows Client OS Detected"
@@ -115,17 +170,29 @@ Else {
         write-host `
             -ForegroundColor Yellow `
             -BackgroundColor Black  `
-            "Windows 10 detected...skipping to next step" 
-    }
+            "Windows 10 detected...skipping to next step"     
+    }    
     else {
-        $OSArch = (Get-CimInstance win32_operatingsystem).OSArchitecture
+        $OSArch = (Get-WmiObject win32_operatingsystem).OSArchitecture
         If(($OSArch) -match '64-bit') {
             write-host `
                 -ForegroundColor Magenta  `
                 -BackgroundColor Black `
                 "Windows 7 x64 detected"
-            $Win7x64_UpdateRequest = [System.Net.WebRequest]::Create($Win7x64_UpdateURI)
-            $Win7x64_WMI5Request   = [System.Net.WebRequest]::Create($Win7x64_WMI5URI)                
+
+
+            #################################
+            #    Begin Win7x64 downloads    #
+            #################################
+            $Win7x64_WinUpdateRequest = [System.Net.WebRequest]::Create($Win7x64_UpdateURI)
+            $Win7x64_WMI5Request      = [System.Net.WebRequest]::Create($Win7x64_WMI5URI)            
+            $Win7x64_WVDAgentRequest  = [System.Net.WebRequest]::Create($Win7x64_WVDAgentURI)
+            $Win7x64_WVDBootRequest   = [System.Net.WebRequest]::Create($Win7x64_WVDBootMgrURI)
+
+
+            ################################
+            #    Begin Win7x64 Installs    #
+            ################################
             write-host `
                 -ForegroundColor Magenta `
                 -BackgroundColor Black `
@@ -141,31 +208,7 @@ Else {
             $wusaParameters += @("/quiet", "/promptrestart")
             $wusaParameterString = $wusaParameters -join " "
             & $wusaExe $wusaParameterString
-
-        }
-        Else {
-            write-host `
-                -ForegroundColor Magenta  `
-                -BackgroundColor Black `
-                "Windows 7 x86 detected"
-            $Win7x86_UpdateRequest = [System.Net.WebRequest]::Create($Win7x32_UpdateURI)
-            $Win7x86_WMI5Request   = [System.Net.WebRequest]::Create($Win7x32_WMI5)              
-            write-host `
-                -ForegroundColor Magenta `
-                -BackgroundColor Black `
-                "...installing Update KB2592687 for x86"
-            Expand-Archive `
-                -LiteralPath "C:\temp\wvd\$Win7x86_WMI5Installer" `
-                -DestinationPath "$Localpath\Win7Wmi5x86" `
-                -Force `
-                -Verbose
-            $packageName = $Win7x86_WMI5Installer
-            $packagePath = 'C:\temp\wvd\Win7Wmi5x86'
-            $wusaExe = "$env:windir\system32\wusa.exe"
-            $wusaParameterString = $wusaParameters -join " "                
-            $wusaParameters += @("/quiet", "/promptrestart")
-            & $wusaExe $wusaParameterString
-        }
+        }        
     }
 }
 
@@ -182,7 +225,9 @@ $bootloader_deploy_status = Start-Process `
         "/passive", `
         "/l* $Localpath\AgentBootLoaderInstall.txt" `
     -Wait `
-    -Passthru
+    -Passthru `
+    -ErrorAction Stop `
+    -Verbose
 $sts = $bootloader_deploy_status.ExitCode
 Write-Output "Installing RDAgentBootLoader on VM Complete. Exit code=$sts`n"
 Wait-Event -Timeout 5
@@ -196,7 +241,9 @@ $agent_deploy_status = Start-Process `
         "/passive", `
         "REGISTRATIONTOKEN=$RegistrationToken", "/l* $Localpath\AgentInstall.txt" `
     -Wait `
-    -Passthru
+    -Passthru `
+    -ErrorAction Stop `
+    -Verbose
 Wait-Event -Timeout 5
 
 
@@ -207,79 +254,103 @@ $fslogix_deploy_status = Start-Process `
     -FilePath "$Localpath\FSLogix\x64\Release\FSLogixAppsSetup.exe" `
     -ArgumentList "/install /quiet" `
     -Wait `
-    -Passthru
+    -Passthru `
+    -ErrorAction Stop `
+    -Verbose
 
 
-##############################
-#    FSLogix Reg Settings    #
-##############################
+#######################################
+#    FSLogix User Profile Settings    #
+#######################################
 Push-Location 
-Set-Location HKLM:\SOFTWARE\FSLogix
+Set-Location HKLM:\SOFTWARE\
 New-Item `
     -Path HKLM:\SOFTWARE\FSLogix `
     -Name Profiles `
     -Value "" `
-    -Force 
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
+    -Force
+New-Item `
+    -Path HKLM:\Software\FSLogix\Profiles\ `
+    -Name Apps `
+    -Force
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
     -Name "Enabled" `
-    -PropertyType "DWord" `
-    -Value 1
+    -Type "Dword" `
+    -Value "1"
+New-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "VHDLocations" `
+    -Value $ProfilePath `
+    -PropertyType MultiString `
+    -Force
+<#
 New-ItemProperty `
     -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "DeleteLocalProfileWhenVHDShouldApply" `
-    -PropertyType "DWord" `
-    -Value 1
+    -Name "CCDLocations" `
+    -PropertyType "MultiString" `
+    -Value "type=smb,connectionString=$ProfilePath"
+#>
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "SizeInMBs" `
+    -Type "Dword" `
+    -Value "1024"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "IsDynamic" `
+    -Type "Dword" `
+    -Value "1"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "VolumeType" `
+    -Type String `
+    -Value "vhdx"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "LockedRetryCount" `
+    -Type "Dword" `
+    -Value "12"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "LockedRetryInterval" `
+    -Type "Dword" `
+    -Value "5"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "ProfileType" `
+    -Type "Dword" `
+    -Value "3"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "ConcurrentUserSessions" `
+    -Type "Dword" `
+    -Value "1"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "RoamSearch" `
+    -Type "Dword" `
+    -Value "2" 
 New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
+    -Path HKLM:\Software\FSLogix\Profiles\Apps `
+    -Name "RoamSearch" `
+    -Type "Dword" `
+    -Value "2"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
     -Name "FlipFlopProfileDirectoryName" `
-    -PropertyType "DWord" `
-    -Value 0
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "PreventLoginWithFailure" `
-    -PropertyType "DWord" `
-    -Value 0
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "PreventLoginWithTempProfile" `
-    -PropertyType "DWord" `
-    -Value 0
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeOneDrive" `
-    -PropertyType "DWord" `
-    -Value 1
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeOneNote" `
-    -PropertyType "DWord" `
-    -Value 1
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeOneNote_UWP" `
-    -PropertyType "DWord" `
-    -Value 0
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeOutlook" `
-    -PropertyType "DWord" `
-    -Value 1
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeOutlookPersonalization" `
-    -PropertyType "DWord" `
-    -Value 1
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeSharepoint" `
-    -PropertyType "DWord" `
-    -Value 1
-New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "IncludeTeams" `
-    -PropertyType "DWord" `
-    -Value 1
+    -Type "Dword" `
+    -Value "1" 
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "SIDDirNamePattern" `
+    -Type String `
+    -Value "%username%%sid%"
+Set-ItemProperty `
+    -Path HKLM:\Software\FSLogix\Profiles `
+    -Name "SIDDirNameMatch" `
+    -Type String `
+    -Value "%username%%sid%" 
 New-ItemProperty `
     -Path HKLM:\SOFTWARE\FSLogix\Profiles `
     -Name "RebootOnUserLogoff" `
@@ -290,21 +361,99 @@ New-ItemProperty `
     -Name "ShutdownOnUserLogoff" `
     -PropertyType "DWord" `
     -Value 0
+Pop-Location
+
+
+#########################################
+#    FSLogix Office Profile Settings    #
+#########################################
+Push-Location 
+Set-Location HKLM:\SOFTWARE\Policies\
+New-Item `
+    -Path .\FSLogix `
+    -Name ODFC `
+    -Value "" `
+    -Force 
 New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
-    -Name "FoldersToRemove" `
-    -PropertyType "MultiString" `
-    -Value ""
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "VHDLocations" `
+    -Value $ProfilePath `
+    -PropertyType MultiString `
+    -Force
+<#
 New-ItemProperty `
-    -Path HKLM:\SOFTWARE\FSLogix\Profiles `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
     -Name "CCDLocations" `
     -PropertyType "MultiString" `
     -Value "type=smb,connectionString=$ProfilePath"
+#>
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "Enabled" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "FlipFlopProfileDirectoryName" `
+    -PropertyType "DWord" `
+    -Value 0
+Set-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "SIDDirNamePattern" `
+    -Type String `
+    -Value "%username%%sid%"
+Set-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "RoamSearch" `
+    -Type "Dword" `
+    -Value "2" 
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeOneDrive" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeOneNote" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeOneNote_UWP" `
+    -PropertyType "DWord" `
+    -Value 0
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeOutlook" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeOutlookPersonalization" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeSharepoint" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeSkype" `
+    -PropertyType "DWord" `
+    -Value 1
+New-ItemProperty `
+    -Path HKLM:\SOFTWARE\Policies\FSLogix\ODFC `
+    -Name "IncludeTeams" `
+    -PropertyType "DWord" `
+    -Value 1
 Pop-Location
+
 
 
 #############
 #    END    #
 #############
 Restart-Computer -Force
+
 
