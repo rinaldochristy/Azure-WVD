@@ -1,15 +1,25 @@
-﻿{
-    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
   "parameters": {
-    "adminUsername": {
+    "Prefix": {
+      "type": "string",
+      "defaultValue": "wvd"
+    },
+    "AdminUserName": {
       "type": "string"
     },
-    "adminPassword": {
+    "AdminPassword": {
       "type": "securestring"
     },
     "DomainFQDN": {
       "type": "string"
+    },
+    "Instance": {
+      "type": "int",
+      "minValue": 1,
+      "maxValue": 99,
+      "defaultValue": 1
     },
     "OperatingSystem": {
       "type": "string",
@@ -28,17 +38,35 @@
         "Large"
       ]
     },
-    "subnetName": {
+    "autoShutdownTime": {
       "type": "string"
     },
-    "virtualNetworkId": {
+    "autoShutdownTimeZone": {
       "type": "string"
     },
-    "virtualMachineName": {
+    "VnetRgName": {
+      "type": "string"
+    },
+    "VnetName": {
+      "type": "string"
+    },
+    "SubnetName": {
+      "type": "string"
+    },
+    "ProfilePath": {
+      "type": "string"
+    },
+    "RegistrationToken": {
+      "type": "string"
+    },
+    "LogAnalyticsWorkspaceID":{
+      "type": "string"
+    },
+    "LogAnalyticsPrimaryKey":{
       "type": "string"
     }
   },
-  "variables": {    
+  "variables": {
     "VM_Images": {
       "Server": {
         "publisher": "MicrosoftWindowsServer",
@@ -64,17 +92,41 @@
         "WVDsize": "Standard_DS14_v2"
       }
     },
-    "vnetId": "[parameters('virtualNetworkId')]",
-    "subnetRef": "[concat(variables('vnetId'), '/subnets/', parameters('subnetName'))]",
-    "JoinUser": "[concat(parameters('adminUsername'),'@',parameters('DomainFQDN'))]"
+    "License": {
+      "Server": {
+        "License": "Windows_Server"
+      },
+      "Client": {
+        "License": "Windows_Client"
+      },
+      "Multi": {
+        "License": "Windows_Client"
+      }
+    },
+    "VMName": "[concat(parameters('Prefix'),'-VM-')]",
+    "subnetRef": "[concat(subscription().id,'/resourceGroups/',parameters('VnetRgName'),'/providers/Microsoft.Network/virtualNetworks/', parameters('VnetName'),'/subnets/', parameters('subnetName'))]",
+    "JoinUser": "[concat(parameters('adminUsername'),'@',parameters('DomainFQDN'))]",
+    "fileUris": "https://raw.githubusercontent.com/DeanCefola/Azure-WVD/master/PowerShell/New-WVDSessionHost.ps1",
+    "UriFileNamePieces": "[split(variables('fileUris'), '/')]",
+    "firstFileNameString": "[variables('UriFileNamePieces')[sub(length(variables('UriFileNamePieces')), 1)]]",
+    "firstFileNameBreakString": "[split(variables('firstFileNameString'), '?')]",
+    "firstFileName": "[variables('firstFileNameBreakString')[0]]",
+    "Arguments": "[string(concat('-ProfilePath ', parameters('ProfilePath'), ' -RegistrationToken ', parameters('RegistrationToken'), '-LogAnalyticsWorkspaceID ', parameters('LogAnalyticsWorkspaceID'),'-LogAnalyticsPrimaryKey ', parameters('LogAnalyticsPrimaryKey')))]"
   },
   "resources": [
     {
-      "name": "[concat(parameters('virtualMachineName'),'-nic')]",
       "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(variables('VMName'),copyIndex(),'-nic')]",
       "apiVersion": "2018-10-01",
       "location": "[resourceGroup().location]",
-      "dependsOn": [],
+      "copy": {
+        "name": "WVDNic-Copy",
+        "count": "[parameters('Instance')]"
+      },
+      "tags": {
+        "costcode": "AA-Money",
+        "displayName": "WVD-Nic"
+      },
       "properties": {
         "ipConfigurations": [
           {
@@ -88,25 +140,32 @@
           }
         ]
       },
-      "tags": {
-        "costcode": "AA-Money"
-      }
+      "dependsOn": [
+
+      ]
+
     },
     {
-      "name": "[parameters('virtualMachineName')]",
       "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('VMName'),copyIndex())]",
       "apiVersion": "2019-03-01",
       "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[concat('Microsoft.Network/networkInterfaces/', parameters('virtualMachineName'),'-nic')]"
-      ],
+      "copy": {
+        "name": "WVD-Copy",
+        "count": "[parameters('Instance')]"
+      },
+      "tags": {
+        "costcode": "AA-Money",
+        "displayName": "WVD-VM"
+      },
       "properties": {
         "hardwareProfile": {
-          "vmSize": "Standard_B2ms"
+          "vmSize": "[variables('VM_SIZES')[parameters('VMSize')].WVDsize]"
         },
         "storageProfile": {
           "osDisk": {
-            "createOption": "fromImage",
+            "name": "[concat(variables('VMName'),copyIndex(),'-OSDisk')]",
+            "createOption": "FromImage",
             "managedDisk": {
               "storageAccountType": "StandardSSD_LRS"
             }
@@ -121,36 +180,67 @@
         "networkProfile": {
           "networkInterfaces": [
             {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('virtualMachineName'),'-nic'))]"
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('VMName'),copyIndex(),'-nic'))]"
             }
           ]
         },
         "osProfile": {
-          "computerName": "[parameters('virtualMachineName')]",
-          "adminUsername": "[parameters('adminUsername')]",
-          "adminPassword": "[parameters('adminPassword')]",
+          "computerName": "[concat(variables('VMName'),copyIndex())]",
+          "adminUsername": "[parameters('AdminUserName')]",
+          "adminPassword": "[parameters('AdminPassword')]",
           "windowsConfiguration": {
             "enableAutomaticUpdates": true,
             "provisionVmAgent": true
           }
         },
-        "licenseType": "Windows_Client"        
+        "licenseType": "[variables('License')[parameters('OperatingSystem')].License]"
       },
+      "zones":[
+        "1"
+      ],
+      "dependsOn": [
+        "WVDNic-Copy"
+      ]
+    },
+    {
+      "name": "[concat('shutdown-computevm-', concat(variables('VMName'),copyIndex()))]",
+      "type": "Microsoft.DevTestLab/schedules",
+      "apiVersion":"2018-09-15",
+      "location": "[resourceGroup().location]",
       "tags": {
-        "costcode": "AA-Money"
+        "costcode": "AA-Money",
+        "displayName": "Shutdown"
       },
-      "zones": [
-        1
+      "copy": {
+        "name": "Shutdown-Copy",
+        "count": "[parameters('Instance')]"
+      },
+      "properties": {
+        "status": "enabled",
+        "taskType": "ComputeVmShutdownTask",
+        "dailyRecurrence": {
+          "time": "[parameters('autoShutdownTime')]"
+        },
+        "timeZoneId": "[parameters('autoShutdownTimeZone')]",
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('VMName'),copyIndex()))]",
+        "notificationSettings": {
+          "status": "Disabled",
+          "notificationLocale": "en",
+          "timeInMinutes": 30
+        }
+      },
+      "dependsOn": [
+        "WVD-Copy"
       ]
     },
     {
       "type": "Microsoft.Compute/virtualMachines/extensions",
-      "name": "[concat('testwin10', '/joinDomain')]",
+      "name": "[concat(variables('VMName'),copyIndex(), '/joinDomain')]",
       "apiVersion": "2015-06-15",
       "location": "[resourceGroup().location]",
       "copy": {
         "name": "JoinDomain-Copy",
-        "count": 1
+        "count": "[parameters('Instance')]"
       },
       "tags": {
         "displayName": "Join Domain"
@@ -171,39 +261,70 @@
         }
       },
       "dependsOn": [
-        "[concat('Microsoft.Compute/virtualMachines/', parameters('virtualMachineName'))]"
+        "Shutdown-Copy"
       ]
     },
     {
-      "name": "Microsoft.CustomScriptExtension-20190928132548",
-      "apiVersion": "2015-01-01",
-      "type": "Microsoft.Resources/deployments",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(variables('VMName'),copyIndex(),'/CustomScriptExtension')]",
+      "apiVersion": "2015-06-15",
+      "location": "[resourceGroup().location]",
+      "copy": {
+        "name": "Script-Copy",
+        "count": "[parameters('Instance')]"
+      },
       "properties": {
-        "mode": "incremental",
-        "templateLink": {
-          "uri": "https://gallery.azure.com/artifact/20161101/Microsoft.CustomScriptExtension-arm.2.0.56/Artifacts/MainTemplate.json"
+        "publisher": "Microsoft.Compute",
+        "type": "CustomScriptExtension",
+        "typeHandlerVersion": "1.9",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "[variables('fileUris')]"
+          ],
+          "commandToExecute": "thing"
         },
-        "parameters": {
-          "vmName": {
-            "value": "testwin10"
-          },
-          "location": {
-            "value": "eastus"
-          },
-          "fileUris": {
-            "value": "https://raw.githubusercontent.com/DeanCefola/Azure-WVD/master/PowerShell/New-WVDSessionHost.ps1"
-          },
-          "arguments": {
-            "value": "-ProfilePath \\\\VM-DC-1.MSAzureAcademy.com\\WVDProfiles -RegistrationToken eyJhbGciOiJSUzI1NiIsImtpZCI6IkFDRkQ1MTcyMkM1MTE5MDI1OTFEQUY3MUY2QzY4MzZDRDI0RjM4QTgiLCJ0eXAiOiJKV1QifQ.eyJSZWdpc3RyYXRpb25JZCI6ImZhMWQxODMwLTVmMjktNGM1Yi04ODBiLTY4NmQ4YmE0ZWJlZCIsIkJyb2tlclVyaSI6Imh0dHBzOi8vcmRicm9rZXIud3ZkLm1pY3Jvc29mdC5jb20vIiwiRGlhZ25vc3RpY3NVcmkiOiJodHRwczovL3JkZGlhZ25vc3RpY3Mud3ZkLm1pY3Jvc29mdC5jb20vIiwiRW5kcG9pbnRQb29sSWQiOiJkNzVjNzVkMC04Y2I4LTRmZmEtZTI4Mi0wOGQ3NDBiYWFlOWUiLCJuYmYiOjE1Njk1NjE0MDksImV4cCI6MTU2OTczNDIwOCwiaXNzIjoiUkRJbmZyYVRva2VuTWFuYWdlciIsImF1ZCI6IlJEbWkifQ.a4a4Q6Jd1rd3sjvjxYhA3_96VZaW41mKVXmHo5ulUf69Wl0L6Qx4ay0sVFWNCwVa0MwrZDML1Y1oW8r9dZyBcoCvWvZiHoBWiV1OjHluLyQysaG_W4D86Uu4Fr4n70m2K6JneJ2NItm97bHr4sMHjAmbgZv0vMMcmHOYAD99XmSp0FU3V-XTUeQACHhU-SDMoFD-dCB0zQ6DjYmF0PDyWQnLdqhT66fTY7tEujcQdgFSk7ne4SDFEYOz6ADEYgJ0g7tr9eBAS8PJz084nPMKS0TrI3wFeJXwz7korelm_b-7QEU7DxMv3ThiwfQrpo5aMMx_mQ3q5qVlDOWhcbBY3w"
-          }
+        "protectedSettings": {
+          "commandToExecute": "[concat ('powershell -ExecutionPolicy Unrestricted -File ', variables('firstFileName'), ' ', variables('arguments'))]"
         }
       },
       "dependsOn": [
         "JoinDomain-Copy"
       ]
     }
-  ],
-    "outputs": {
-       
+{
+    "name": "virtualNetwork1",
+    "type": "Microsoft.Network/virtualNetworks",
+    "apiVersion": "2018-08-01",
+    "location": "[resourceGroup().location]",
+    "tags": {
+        "displayName": "virtualNetwork1"
+    },
+    "properties": {
+        "addressSpace": {
+            "addressPrefixes": [
+                "10.0.0.0/16"
+            ]
+        },
+        "subnets": [
+            {
+                "name": "Subnet-1",
+                "properties": {
+                    "addressPrefix": "10.0.0.0/24"
+                }
+            },
+            {
+                "name": "Subnet-2",
+                "properties": {
+                    "addressPrefix": "10.0.1.0/24"
+                }
+            }
+        ]
     }
+}
+
+  ],
+  "outputs": {
+
+  }
 }
