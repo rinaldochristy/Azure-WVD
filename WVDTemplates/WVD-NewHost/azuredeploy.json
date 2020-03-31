@@ -38,12 +38,6 @@
         "Large"
       ]
     },
-    "autoShutdownTime": {
-      "type": "string"
-    },
-    "autoShutdownTimeZone": {
-      "type": "string"
-    },
     "VnetRgName": {
       "type": "string"
     },
@@ -106,7 +100,7 @@
     "VMName": "[concat(parameters('Prefix'),'-VM-')]",
     "subnetRef": "[concat(subscription().id,'/resourceGroups/',parameters('VnetRgName'),'/providers/Microsoft.Network/virtualNetworks/', parameters('VnetName'),'/subnets/', parameters('subnetName'))]",
     "JoinUser": "[concat(parameters('adminUsername'),'@',parameters('DomainFQDN'))]",
-    "fileUris": "https://raw.githubusercontent.com/DeanCefola/Azure-WVD/WIP/PowerShell/New-WVDSessionHost.ps1",
+    "fileUris": "https://raw.githubusercontent.com/DeanCefola/Azure-WVD/master/PowerShell/New-WVDSessionHost.ps1",
     "UriFileNamePieces": "[split(variables('fileUris'), '/')]",
     "firstFileNameString": "[variables('UriFileNamePieces')[sub(length(variables('UriFileNamePieces')), 1)]]",
     "firstFileNameBreakString": "[split(variables('firstFileNameString'), '?')]",
@@ -203,37 +197,6 @@
       ]
     },
     {
-      "name": "[concat('shutdown-computevm-', concat(variables('VMName'),copyIndex()))]",
-      "type": "Microsoft.DevTestLab/schedules",
-      "apiVersion":"2018-09-15",
-      "location": "[resourceGroup().location]",
-      "tags": {
-        "costcode": "AA-Money",
-        "displayName": "Shutdown"
-      },
-      "copy": {
-        "name": "Shutdown-Copy",
-        "count": "[parameters('Instance')]"
-      },
-      "properties": {
-        "status": "enabled",
-        "taskType": "ComputeVmShutdownTask",
-        "dailyRecurrence": {
-          "time": "[parameters('autoShutdownTime')]"
-        },
-        "timeZoneId": "[parameters('autoShutdownTimeZone')]",
-        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('VMName'),copyIndex()))]",
-        "notificationSettings": {
-          "status": "Disabled",
-          "notificationLocale": "en",
-          "timeInMinutes": 30
-        }
-      },
-      "dependsOn": [
-        "WVD-Copy"
-      ]
-    },
-    {
       "type": "Microsoft.Compute/virtualMachines/extensions",
       "name": "[concat(variables('VMName'),copyIndex(), '/joinDomain')]",
       "apiVersion": "2015-06-15",
@@ -261,7 +224,7 @@
         }
       },
       "dependsOn": [
-        "Shutdown-Copy"
+        "WVD-Copy"
       ]
     },
     {
@@ -292,37 +255,6 @@
         "JoinDomain-Copy"
       ]
     }
-{
-    "name": "virtualNetwork1",
-    "type": "Microsoft.Network/virtualNetworks",
-    "apiVersion": "2018-08-01",
-    "location": "[resourceGroup().location]",
-    "tags": {
-        "displayName": "virtualNetwork1"
-    },
-    "properties": {
-        "addressSpace": {
-            "addressPrefixes": [
-                "10.0.0.0/16"
-            ]
-        },
-        "subnets": [
-            {
-                "name": "Subnet-1",
-                "properties": {
-                    "addressPrefix": "10.0.0.0/24"
-                }
-            },
-            {
-                "name": "Subnet-2",
-                "properties": {
-                    "addressPrefix": "10.0.1.0/24"
-                }
-            }
-        ]
-    }
-}
-
   ],
   "outputs": {
 
